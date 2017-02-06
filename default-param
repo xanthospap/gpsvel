@@ -13,7 +13,6 @@ pth2faults=$HOME/Map_project/faults/NOAFaults_v1.0.gmt
 #Path to input file directory
 pth2inptf=$(pwd)
 
-
 #outfiles
 outfile=testvel.eps
 out_jpg=testvel.jpg
