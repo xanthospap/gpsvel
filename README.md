@@ -58,15 +58,15 @@ For main script help function run:
   $> ./gpsvelstr.sh -h 
 ``` 
 **INPUT FILES**
- - input file for velocitiew, use mm for velocities and uncertenties
+ - input file for velocities, use **mm** for velocities and uncertenties
 ```
 code lat lon alt vN svN vE svE vU svU
 ```
- - input file for straintensor parameters, K in μstrain and Az in degrees
+ - input file for straintensor parameters, K in **μstrain** and Az in **degrees**
 ```
 code lat lon Kmax sKmax Kmin sKmin Az sAz E sE gtot sgtot
 ```
-(do not use a seperator!)
+(do not use a seperator)
 
 
 
@@ -83,7 +83,8 @@ code lat lon Kmax sKmax Kmin sKmin Az sAz E sE gtot sgtot
  - faults [:= faults] plot NOA fault database
  
 **PLOT VELOCITIES**
- - vhor (input_file)[:= horizontal velocities] 
+ - vhor (input_file)[:= horizontal velocities]. More than one input files can be
+   specified, as (space) seperated list of files. Each will be plotted using a different color.
  - vver (input_file)[:= vertical velocities]
  - vsc [:=velocity scale] change vElocity scale default (0.05)
 
@@ -140,5 +141,3 @@ Wessel, P., W. H. F. Smith, R. Scharroo, J. F. Luis, and F. Wobbe, Generic Mappi
 Demitris Anastasiou, danast@mail.ntua.gr
 
 Xanthos Papanikolaou, xanthos@mail.ntua.gr
-
-
