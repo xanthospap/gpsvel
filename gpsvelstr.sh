@@ -1,7 +1,25 @@
 #!/bin/bash
 
-echoerr () { echo "$@" 1>&2; }
-echolog () { echo "$@"; }
+##  the logfile (can be set later on). By default it is set to 'stderr'.
+LOGFILE=stderr
+
+##  the version
+VERSION="gpsvelstr 1.0.10"
+
+##
+##  if LOGFILE is 'stderr' write message to STDERR. Else write it to both
+##+ STDERR and LOGFILE
+##
+echoerr () { 
+    [ "$LOGFILE" == "stderr" ] && { echo "$@" 1>&2 ; } || \
+    { echo "$@" | tee -a $LOGFILE 1>&2; }
+}
+
+##
+##  if LOGFILE is 'stderr' write message to /dev/null (i.e. nowhere). Else write
+##+ it to LOGFILE
+##
+echolog () { [ "$LOGFILE" != "stderr" ] && { echo "$@" 1>>$LOGFILE; } }
 
 check_status () {
     if ! test $1 -eq 0 ; then
@@ -16,7 +34,7 @@ check_status () {
 function help {
     echo "/******************************************************************************/"
     echo " Program Name : gpsvelstr.sh"
-    echo " Version : v-0.1"
+    echo " Version : ${VERSION}"
     echo " Purpose : Plot velocities and strains"
     echo " Default param file: default-param"
     echo " Usage   :gpsvelstr.sh -r west east south north | -topo | -o [output] | -jpg "
@@ -54,7 +72,7 @@ function help {
     echo ""
     echo "run: ./gpsvelstr.sh -topo -jpg "
     echo "/******************************************************************************/"
-    exit 1
+    exit 0
 }
 
 ## 
@@ -87,7 +105,7 @@ STRROT=0
 ##  The file "default-param" is neccesary. Check that it exists.
 ##
 if ! test -f "default-param"; then
-    echoerr "[ERROR] default-param file does not exist"
+    echoerr "[ERROR] default-param file does not exist."
     exit 1
 else
     source default-param
@@ -98,6 +116,10 @@ fi
 ##+ filled up with all files specified as arguments to "-vhor".
 ##
 declare -a horvelfls=()
+##
+##  Same (as above) for vertical velocities.
+##
+declare -a vervelfls=()
 
 ##
 ##  GMT color list. Each seperate file will be ploted with a different color.
@@ -128,16 +150,23 @@ while [ $# -gt 0 ] ; do
         ;;
         -vhor)  ## more than one input files are accepted
         shift
+        ##  keep on reading files until we reach an argument starting with '-'.
+        ##+ Files are added to the 'horvelfls' array.
         while [ $# -gt 0 ] && [ "${1:0:1}" != "-" ] ; do
-            horvelfls+=("${pth2inptf}/$1")
+            horvelfls+=("$1")
             shift
         done
         VHORIZONTAL=1
         ;;
         -vver)
-        pth2vver=${pth2inptf}/$2
+        shift
+        ##  keep on reading files until we reach an argument starting with '-'.
+        ##+ Files are added to the 'vervelfls' array.
+        while [ $# -gt 0 ] && [ "${1:0:1}" != "-" ] ; do
+            vervelfls+=("$1")
+            shift
+        done
         VVERTICAL=1
-        shift 2
         ;;
 #     -valign)
 #       pth2valong=${pth2inptf}/${2}_along.vel
@@ -165,7 +194,7 @@ while [ $# -gt 0 ] ; do
         shift 2
         ;;
         -topo)
-#                       switch topo not used in server!
+# switch topo not used in server!
         TOPOGRAPHY=1
         shift
         ;;
@@ -176,8 +205,7 @@ while [ $# -gt 0 ] ; do
         -o)
         outfile=${2}.eps
         out_jpg=${2}.jpg
-        shift
-        shift
+        shift 2
         ;;
         -l)
         LABELS=1
@@ -198,9 +226,8 @@ while [ $# -gt 0 ] ; do
         -h)
         help
         ;;
-        esac
-        done
-
+    esac
+done
 
 ##
 ##  resolve, check and set parameters/variables based on the command line
@@ -234,10 +261,18 @@ if test "$VHORIZONTAL" -eq 1 ; then
 fi
 
 if test "$VVERTICAL" -eq 1 ; then
-    if ! test -f $pth2vver ; then
-        echoerr "[ERROR] input file $pth2vver does not exist"
-        echoerr "        please download it and then use this switch"
-        VVERTICAL=0
+    for j in "${vervelfls[@]}" ; do
+        if ! test -f $j ; then
+            echoerr "[ERROR] Vertical velocity file \"$j\" does not exist."
+            VVERTICAL=0
+            exit 1
+        fi
+    done
+    if test ${#vervelfls[@]} -gt ${#gmtcolorlist[@]} ; then
+        echoerr "[ERROR] Not enough colors in array \"gmtcolorlist\" to plot"
+        echoerr "        all individual velocity files."
+        echoerr "        Append more color-names to \"gmtcolorlist\". A list can"
+        echoerr "        be found here: https://www.soest.hawaii.edu/gmt/gmt/html/man/gmtcolors.html"
         exit 1
     fi
 fi
@@ -279,7 +314,8 @@ fi
 ##  OK. Now we are ready to start to processing ....
 ##
 echo "Starting plotting...."
-echo "Output directed to \"$outfile\""
+echo "Output directed to \"$outfile\"."
+echo "Error/log messages writeen in \"$LOGFILE\"."
 
 ##
 ##  set region properties; these are default for GREECE REGION
@@ -295,25 +331,33 @@ proj="-Jm24/37/1:$projscale"
 
 ##
 ##  TOPOGRAPHY
+##  If any of the GMT commands fails, then the script will exit with a status
+##+ code of '1'.
 ##
 if test "$TOPOGRAPHY" -eq 0 ; then
     #  Plot coastlines only
-    gmt psbasemap $range $proj $scale -B$frame:."$maptitle": -P -K > $outfile
-    gmt pscoast -R -J -O -K -W0.25 -G195 -Df -Na -U$logo_pos >> $outfile
+    gmt psbasemap $range $proj $scale -B$frame:."$maptitle": -P -K > $outfile \
+        || { exit 1 ; }
+    gmt pscoast -R -J -O -K -W0.25 -G195 -Df -Na -U$logo_pos >> $outfile \
+        || { exit 1; }
     #  pscoast -Jm -R -Df -W0.25p,black -G195  -U$logo_pos -K -O -V >> $outfile
     #  psbasemap -R -J -O -K --FONT_ANNOT_PRIMARY=10p $scale --FONT_LABEL=10p >> $outfile
 else
     ##  bathymetry
-    gmt makecpt -Cgebco.cpt -T-7000/0/150 -Z > $bathcpt
-    gmt grdimage $inputTopoB $range $proj -C$bathcpt -K > $outfile
-    gmt pscoast $proj -P $range -Df -Gc -K -O >> $outfile
+    gmt makecpt -Cgebco.cpt -T-7000/0/150 -Z > $bathcpt || { exit 1; }
+    gmt grdimage $inputTopoB $range $proj -C$bathcpt -K > $outfile\
+        || { exit 1; }
+    gmt pscoast $proj -P $range -Df -Gc -K -O >> $outfile|| { exit 1; }
     ##  land
-    gmt makecpt -Cgray.cpt -T-3000/1800/50 -Z > $landcpt
-    gmt grdimage $inputTopoL $range $proj -C$landcpt  -K -O >> $outfile
-    gmt pscoast -R -J -O -K -Q >> $outfile
+    gmt makecpt -Cgray.cpt -T-3000/1800/50 -Z > $landcpt|| { exit 1; }
+    gmt grdimage $inputTopoL $range $proj -C$landcpt  -K -O >> $outfile \
+        || { exit 1; }
+    gmt pscoast -R -J -O -K -Q >> $outfile|| { exit 1; }
     ##  coastline
-    gmt psbasemap -R -J -O -K -B$frame:."$maptitle":  $scale >> $outfile
-    gmt pscoast -J -R -Df -W0.25p,black -K  -O -U$logo_pos >> $outfile
+    gmt psbasemap -R -J -O -K -B$frame:."$maptitle":  $scale >> $outfile \
+        || { exit 1; }
+    gmt pscoast -J -R -Df -W0.25p,black -K  -O -U$logo_pos >> $outfile \
+        || { exit 1; }
 fi
 
 ##
@@ -327,6 +371,9 @@ fi
 ##
 ##  plot horizontal velocities. Read velocities from input file(s). Each file
 ##+ will be ploted with a different color based on the "gmtcolor" array.
+##  If any of the GMT commands fails, then the script will exit with a status
+##+ code of '1'.
+##
 ##  WARNING: gmt5 std must be zero to plot
 ##
 if test "$VHORIZONTAL" -eq 1 ; then
@@ -336,46 +383,53 @@ if test "$VHORIZONTAL" -eq 1 ; then
         echolog "Ploting horizontal velocity file \"$j\" with color \"$ccolor\"."
         awk '{print $3,$2}' $j \
             | gmt psxy -Jm -O -R -Sc0.10c -W0.005c -G${ccolor} -K \
-            >> $outfile
+            >> $outfile || { exit 1; }
         awk '{print $3,$2,$7,$5,$8,$6,0,$1}' $j | \
             gmt psvelo -R -J -Se${VSC}/0.95/0 -W.3p,100 -A10p+e \
-            -G${ccolor} -O -K -L -V >> $outfile  # 205/133/63.
+            -G${ccolor} -O -K -L -V >> $outfile || { exit 1; } # 205/133/63.
         awk '{print $3,$2,$7,$5,$8,$6,0,$1}' $j | \
             gmt psvelo -R -J -Se${VSC}/0/0 -W2p,${ccolor} -A10p+e -G${ccolor} \
-            -O -K -L -V >> $outfile  # 205/133/63.
+            -O -K -L -V >> $outfile || { exit 1; }  # 205/133/63.
         if test "$LABELS" -eq 1 ; then
             awk '{print $3,$2,9,0,1,"RB",$1}' $j | \
                 gmt pstext -Jm -R -Dj0.2c/0.2c -O -K -V \
-                >> $outfile
+                >> $outfile || { exit 1; }
         fi
         coloriter=$((coloriter+1))
     done
     ##  scale
     echo "$vsclon $vsclat $vscmagn 0 0 0 0 $vscmagn mm" | \
         gmt psvelo -R -Jm -Se${VSC}/0.95/10 -W2p,blue -A10p+e -Gblack \
-        -O -K -L -V >> $outfile
+        -O -K -L -V >> $outfile || { exit 1; }
 fi
 
 ##
 ##  plot vertical velocities.
 ##
 if test "$VVERTICAL" -eq 1 ; then
-    awk '{print $3,$2}' $pth2vver | gmt psxy -Jm -O -R -Sc0.15c -W0.005c \
-        -Gwhite -K >> $outfile
-    awk '{if ($9<0) print $3,$2,0,$9,0,0,0,$1}' $pth2vver | \
-        gmt psvelo -R -Jm -Se${VSC}/0.95/0 -W2p,red -A10p+e -Gred \
-        -O -K -L -V >> $outfile
-    awk '{if ($9>=0) print $3,$2,0,$9,0,0,0,$1}' $pth2vver | \
-        gmt psvelo -R -Jm -Se${VSC}/0.95/0 -W2p,blue -A10p+e -Gblue \
-        -O -K -L -V >> $outfile
-    if test "$LABELS" -eq 1 ; then
-        awk '{print $3,$2,9,0,1,"RB",$1}' $pth2vhor | \
-            gmt pstext -Jm -R -Dj0.2c/0.2c -Gwhite -O -K -V>> $outfile
-    fi
+    coloriter=0
+    for j in "${vervelfls[@]}" ; do
+        ccolor=${gmtcolorlist[$coloriter]}
+        echolog "Ploting vertical velocity file \"$j\" with color \"$ccolor\"."
+        awk '{print $3,$2}' $pth2vver | gmt psxy -Jm -O -R -Sc0.15c -W0.005c \
+            -Gwhite -K >> $outfile || { exit 1; }
+        awk '{if ($9<0) print $3,$2,0,$9,0,0,0,$1}' $pth2vver | \
+            gmt psvelo -R -Jm -Se${VSC}/0.95/0 -W2p,red -A10p+e -Gred \
+            -O -K -L -V >> $outfile || { exit 1; }
+        awk '{if ($9>=0) print $3,$2,0,$9,0,0,0,$1}' $pth2vver | \
+            gmt psvelo -R -Jm -Se${VSC}/0.95/0 -W2p,blue -A10p+e -Gblue \
+            -O -K -L -V >> $outfile || { exit 1; }
+        if test "$LABELS" -eq 1 ; then
+            awk '{print $3,$2,9,0,1,"RB",$1}' $pth2vhor | \
+                gmt pstext -Jm -R -Dj0.2c/0.2c -Gwhite -O -K -V \
+                >> $outfile || { exit 1; }
+        fi
+        coloriter=$((coloriter+1))
+    done
     ##  scale
     echo "$vsclon $vsclat 0 $vscmagn  0 0 0 $vscmagn mm" | \
         gmt psvelo -R -Jm -Se$VSC/0.95/10 -W2p,blue -A10p+e -Gblue \
-        -O -K -L -V >> $outfile
+        -O -K -L -V >> $outfile || { exit 1; }
 fi
 
 ##
@@ -408,14 +462,14 @@ fi
 ##  plot legend
 ##
 if test "$LEGEND" -eq 1 ; then
-    gmt pslegend .legend ${legendc} -C0.1c/0.1c -L1.3 -O -K >> $outfile
+    gmt pslegend .legend ${legendc} -C0.1c/0.1c -L1.3 -O -K >> $outfile || { exit 1; }
 fi
 
 ##
 ##  plot logo dso
 ##
 if test "$LOGO" -eq 1 ; then
-    gmt psimage $pth2logos -O $logo_pos2 -W1.1c -F0.4  -K >>$outfile
+    gmt psimage $pth2logos -O $logo_pos2 -W1.1c -F0.4  -K >>$outfile || { exit 1; }
 fi
 
 ##
@@ -432,8 +486,10 @@ if test "$OUTJPG" -eq 1 ; then
 fi
 
 ##  remove tmp files
+{
 rm .legend 2>/dev/null
 rm *cpt 2>/dev/null
+} 2>/dev/null
  
 ##  NOA FAULTS reference
 ##  Ganas Athanassios, Oikonomou Athanassia I., and Tsimi Christina, 2013. NOAFAULTS: a digital database for active faults in Greece. Bulletin of
