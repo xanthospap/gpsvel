@@ -7,6 +7,11 @@ LOGFILE=stderr
 VERSION="gpsvelstr 1.0.10"
 
 ##
+##  verbosity level for GMT, see http://gmt.soest.hawaii.edu/doc/5.1.0/gmt.html#v-full
+##
+GMTVRB=n
+
+##
 ##  if LOGFILE is 'stderr' write message to STDERR. Else write it to both
 ##+ STDERR and LOGFILE
 ##
@@ -26,6 +31,40 @@ check_status () {
         echoerr "[ERROR] Command failed; returning..."
         exit 1
     fi
+}
+
+##
+##  Function to check the validity of an input file. The function expects two
+##+ arguments:
+##  1. the filename of the file to check (including path and everything)
+##  2. the number of fields the file should have (i.e. for horizontal velocity
+##+    files, this should be '10').
+##
+##  The function will check:
+##  1. If the file exists
+##  3. If all the lines within the file have the same number of fields, and
+##  2. If the number of fields within the file are $2
+##
+##  If anything goes wrong, the function will return 1, else it will return 0.
+##
+check_inputfl ()
+{
+    local file=$1
+    local fields=$2
+    if ! test -f $file ; then
+        echoerr "[ERROR] File \"$file\" does not exist."
+        return 1
+    fi
+    if test $(cat $file | awk '{print NF}' | uniq | wc -l) -ne 1 ; then
+        echoerr "[ERROR] File \"$file\" contains inconsistent lines"
+        echoerr "        (number of fields is not always the same)."
+        return 1
+    fi
+    if test $(cat $file | awk '{print NF}' | uniq) -ne $fields ; then
+        echoerr "[ERROR] File \"$file\" should contain ten (10) fields!"
+        return 1
+    fi
+    return 0
 }
 
 ##
@@ -244,13 +283,8 @@ fi
 
 ##  check input files
 if test "$VHORIZONTAL" -eq 1 ; then
-    for j in "${horvelfls[@]}" ; do
-        if ! test -f $j ; then
-            echoerr "[ERROR] Horizontal velocity file \"$j\" does not exist."
-            VHORIZONTAL=0
-            exit 1
-        fi
-    done
+    for j in "${horvelfls[@]}" ; do check_inputfl $j 10 || exit 1 ; done
+    ##  check that we have enough colors to plot all files
     if test ${#horvelfls[@]} -gt ${#gmtcolorlist[@]} ; then
         echoerr "[ERROR] Not enough colors in array \"gmtcolorlist\" to plot"
         echoerr "        all individual velocity files."
@@ -261,13 +295,7 @@ if test "$VHORIZONTAL" -eq 1 ; then
 fi
 
 if test "$VVERTICAL" -eq 1 ; then
-    for j in "${vervelfls[@]}" ; do
-        if ! test -f $j ; then
-            echoerr "[ERROR] Vertical velocity file \"$j\" does not exist."
-            VVERTICAL=0
-            exit 1
-        fi
-    done
+    for j in "${vervelfls[@]}" ; do check_inputfl $j 10 || exit 1 ; done
     if test ${#vervelfls[@]} -gt ${#gmtcolorlist[@]} ; then
         echoerr "[ERROR] Not enough colors in array \"gmtcolorlist\" to plot"
         echoerr "        all individual velocity files."
@@ -364,7 +392,7 @@ fi
 ##  plot noa catalogue faults ganas et.al, 2013
 ##
 if test "$FAULTS" -eq 1 ; then
-    echo "ploting NOA FAULTS CATALOGUE Ganas et.al, 2013 ..."
+    echo "ploting NOA faults catalogue Ganas et.al, 2013 ..."
     gmt psxy $pth2faults -R -J -O -K  -W.5,204/102/0  >> $outfile
 fi
 
@@ -385,11 +413,11 @@ if test "$VHORIZONTAL" -eq 1 ; then
             | gmt psxy -Jm -O -R -Sc0.10c -W0.005c -G${ccolor} -K \
             >> $outfile || { exit 1; }
         awk '{print $3,$2,$7,$5,$8,$6,0,$1}' $j | \
-            gmt psvelo -R -J -Se${VSC}/0.95/0 -W.3p,100 -A10p+e \
-            -G${ccolor} -O -K -L -V >> $outfile || { exit 1; } # 205/133/63.
+            gmt psvelo -R -J -Se${VSC}/0.95/0 -W.3p,100 -A10p+e -V${GMTVRB} \
+            -G${ccolor} -O -K -L >> $outfile || { exit 1; } # 205/133/63.
         awk '{print $3,$2,$7,$5,$8,$6,0,$1}' $j | \
             gmt psvelo -R -J -Se${VSC}/0/0 -W2p,${ccolor} -A10p+e -G${ccolor} \
-            -O -K -L -V >> $outfile || { exit 1; }  # 205/133/63.
+            -O -K -L -V${GMTVRB} >> $outfile || { exit 1; }  # 205/133/63.
         if test "$LABELS" -eq 1 ; then
             awk '{print $3,$2,9,0,1,"RB",$1}' $j | \
                 gmt pstext -Jm -R -Dj0.2c/0.2c -O -K -V \
@@ -400,11 +428,14 @@ if test "$VHORIZONTAL" -eq 1 ; then
     ##  scale
     echo "$vsclon $vsclat $vscmagn 0 0 0 0 $vscmagn mm" | \
         gmt psvelo -R -Jm -Se${VSC}/0.95/10 -W2p,blue -A10p+e -Gblack \
-        -O -K -L -V >> $outfile || { exit 1; }
+        -O -K -L -V${GMTVRB} >> $outfile || { exit 1; }
 fi
 
 ##
-##  plot vertical velocities.
+##  plot vertical velocities. Read velocities from input file(s). Each file
+##+ will be ploted with a different color based on the "gmtcolor" array.
+##  If any of the GMT commands fails, then the script will exit with a status
+##+ code of '1'.
 ##
 if test "$VVERTICAL" -eq 1 ; then
     coloriter=0
@@ -415,10 +446,10 @@ if test "$VVERTICAL" -eq 1 ; then
             -Gwhite -K >> $outfile || { exit 1; }
         awk '{if ($9<0) print $3,$2,0,$9,0,0,0,$1}' $pth2vver | \
             gmt psvelo -R -Jm -Se${VSC}/0.95/0 -W2p,red -A10p+e -Gred \
-            -O -K -L -V >> $outfile || { exit 1; }
+            -O -K -L -V${GMTVRB} >> $outfile || { exit 1; }
         awk '{if ($9>=0) print $3,$2,0,$9,0,0,0,$1}' $pth2vver | \
             gmt psvelo -R -Jm -Se${VSC}/0.95/0 -W2p,blue -A10p+e -Gblue \
-            -O -K -L -V >> $outfile || { exit 1; }
+            -O -K -L -V${GMTVRB} >> $outfile || { exit 1; }
         if test "$LABELS" -eq 1 ; then
             awk '{print $3,$2,9,0,1,"RB",$1}' $pth2vhor | \
                 gmt pstext -Jm -R -Dj0.2c/0.2c -Gwhite -O -K -V \
@@ -429,7 +460,7 @@ if test "$VVERTICAL" -eq 1 ; then
     ##  scale
     echo "$vsclon $vsclat 0 $vscmagn  0 0 0 $vscmagn mm" | \
         gmt psvelo -R -Jm -Se$VSC/0.95/10 -W2p,blue -A10p+e -Gblue \
-        -O -K -L -V >> $outfile || { exit 1; }
+        -O -K -L -V${GMTVRB} >> $outfile || { exit 1; }
 fi
 
 ##
@@ -438,15 +469,15 @@ fi
 if test "$STRAIN" -eq 1 ; then
     #  compression
     awk '{print $3,$2,0,$6,$8+90}' $pth2strain | gmt psvelo -Jm $range \
-        -Sx${STRSC} -L -A10p+e -Gblue -W2p,blue -V  -K -O>> $outfile
+        -Sx${STRSC} -L -A10p+e -Gblue -W2p,blue -V${GMTVRB} -K -O>> $outfile
     #  extension
     awk '{print $3,$2,$4,0,$8+90}' $pth2strain | gmt psvelo -Jm $range \
-        -Sx${STRSC} -L -A10p+e -Gred -W2p,red -V  -K -O>> $outfile
+        -Sx${STRSC} -L -A10p+e -Gred -W2p,red -V${GMTVRB} -K -O>> $outfile
     #  
     echo "$strsclon $strsclat 0 -.01 90" | gmt psvelo -Jm $range \
-        -Sx${STRSC} -L -A10p+e -Gblue -W2p,blue -V  -K -O>> $outfile
+        -Sx${STRSC} -L -A10p+e -Gblue -W2p,blue -V${GMTVRB} -K -O>> $outfile
     echo "$strsclon $strsclat .01 0 90" | gmt psvelo -Jm $range \
-        -Sx${STRSC} -L -A10p+e -Gred -W2p,red -V  -K -O>> $outfile
+        -Sx${STRSC} -L -A10p+e -Gred -W2p,red -V${GMTVRB} -K -O>> $outfile
     echo "$strsclon $strsclat 9 0 1 CB 10 nstrain" | gmt pstext -Jm -R \
         -Dj0c/1c -Gwhite -O -K -V>> $outfile
 fi
